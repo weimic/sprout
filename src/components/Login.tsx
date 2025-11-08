@@ -63,13 +63,13 @@ const Login: React.FC = () => {
     return (
         <div className="flex items-center justify-center min-h-full p-4">
             <div className="w-full max-w-md space-y-8">
-                <div className="bg-gray-800 p-8 sm:p-10 rounded-xl shadow-2xl border border-gray-700">
+                <div className="bg-card p-8 sm:p-10 rounded-xl shadow-2xl border border-border">
                     <div className="text-center">
-                        <h2 className="text-3xl font-extrabold text-white">
+                        <h2 className="text-3xl font-extrabold text-foreground">
                             {isSignUp ? 'Create an Account' : 'Sign In'}
                         </h2>
-                        <p className="mt-2 text-sm text-gray-400">
-                            {isSignUp ? 'Get started with our service' : 'Welcome back'}
+                        <p className="mt-2 text-sm text-muted-foreground">
+                            {isSignUp ? 'Get started.' : 'Welcome back!'}
                         </p>
                     </div>
 
@@ -85,7 +85,7 @@ const Login: React.FC = () => {
                                     required
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
-                                    className="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-600 bg-gray-900 text-gray-100 placeholder-gray-500 rounded-t-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                    className="appearance-none rounded-none relative block w-full px-3 py-3 border border-input bg-background text-foreground placeholder-muted-foreground rounded-t-md focus:outline-none focus:border-primary focus:z-10 sm:text-sm"
                                     placeholder="Email address"
                                 />
                             </div>
@@ -99,14 +99,14 @@ const Login: React.FC = () => {
                                     required
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-600 bg-gray-900 text-gray-100 placeholder-gray-500 rounded-b-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                                    className="appearance-none rounded-none relative block w-full px-3 py-3 border border-input bg-background text-foreground placeholder-muted-foreground rounded-b-md focus:outline-none focus:border-primary focus:z-10 sm:text-sm"
                                     placeholder="Password"
                                 />
                             </div>
                         </div>
 
                         {error && (
-                            <div className="text-sm text-red-400 text-center font-medium">
+                            <div className="text-sm text-destructive text-center font-medium">
                                 {error}
                             </div>
                         )}
@@ -115,16 +115,16 @@ const Login: React.FC = () => {
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-semibold rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed transition-colors"
+                                className="cursor-pointer group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-semibold rounded-md text-primary-foreground bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-primary disabled:bg-primary/70 disabled:cursor-not-allowed transition-colors"
                             >
                                 {loading ? 'Processing...' : (isSignUp ? 'Sign Up' : 'Sign In')}
                             </button>
                         </div>
                     </form>
                     <div className="mt-6 text-center">
-                        <p className="text-sm text-gray-400">
+                        <p className="text-sm text-muted-foreground">
                             {isSignUp ? 'Already have an account?' : "Don't have an account?"}
-                            <button onClick={toggleAuthMode} className="font-medium text-blue-400 hover:text-blue-300 ml-2 focus:outline-none focus:underline">
+                            <button onClick={toggleAuthMode} className="cursor-pointer font-medium text-primary hover:text-primary/90 ml-2 focus:outline-none focus:underline">
                                 {isSignUp ? 'Sign In' : 'Sign Up'}
                             </button>
                         </p>
