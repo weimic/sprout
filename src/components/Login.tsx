@@ -1,10 +1,11 @@
+"use client";
 
 import React, { useState } from 'react';
-import { 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword,
-    AuthError
+import {
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword
 } from 'firebase/auth';
+import { FirebaseError } from 'firebase/app';
 import { auth } from '../services/firebase';
 
 const getFirebaseErrorMessage = (errorCode: string) => {
@@ -41,8 +42,12 @@ const Login: React.FC = () => {
                 await signInWithEmailAndPassword(auth, email, password);
             }
         } catch (err) {
-            const authError = err as AuthError;
-            setError(getFirebaseErrorMessage(authError.code));
+            const authError = err as FirebaseError;
+            if (authError?.code) {
+                setError(getFirebaseErrorMessage(authError.code));
+            } else {
+                setError('Unexpected error.');
+            }
         } finally {
             setLoading(false);
         }

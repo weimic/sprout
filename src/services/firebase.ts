@@ -1,6 +1,6 @@
 
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { initializeApp, getApps, FirebaseApp } from "firebase/app";
+import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 
 // TODO: Replace with your own Firebase project configuration
 const firebaseConfig = {
@@ -12,8 +12,17 @@ const firebaseConfig = {
   appId: "YOUR_APP_ID"
 };
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// Initialize Firebase (guard so it doesn't re-init in Fast Refresh / multiple imports)
+const app: FirebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
-// Initialize Firebase Authentication and get a reference to the service
+// Auth instance
 export const auth = getAuth(app);
+
+// Set persistence (local keeps user signed in across tabs & reloads)
+try {
+  void setPersistence(auth, browserLocalPersistence);
+} catch (e) {
+  // Non-fatal: log for debugging only.
+  // eslint-disable-next-line no-console
+  console.warn('Failed to set auth persistence', e);
+}
