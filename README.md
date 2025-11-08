@@ -34,3 +34,40 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Firestore CRUD (projects and ideas)
+
+This app uses Cloud Firestore with the following data model:
+
+- users/{userId}/projects/{projectId}
+	- name: string
+	- dateCreated: timestamp
+	- mainContext: string
+- users/{userId}/projects/{projectId}/ideas/{ideaId}
+	- text: string
+	- index: number (ascending order)
+	- isLiked: boolean
+	- addtlText: string
+	- x?: number, y?: number (optional for spatial placement)
+
+Service entry point: `src/services/firestore.ts`.
+
+Examples:
+
+```ts
+import { createProject, listProjectsForUser, createIdea, listIdeasForProject } from "@/services/firestore";
+
+// Create a project
+const projectId = await createProject(user.uid, { name: "My Project", mainContext: "brainstorm topic" });
+
+// List projects
+const projects = await listProjectsForUser(user.uid);
+
+// Create an idea (auto sequential index)
+const ideaId = await createIdea(user.uid, projectId, { text: "first idea" });
+
+// List ideas (ordered by index asc)
+const ideas = await listIdeasForProject(user.uid, projectId);
+```
+
+Dynamic project route is available at `/dashboard/(projects)/[projectId]`.

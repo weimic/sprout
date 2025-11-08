@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app';
 import { auth } from '../services/firebase';
+import { createUserDocument } from '../services/firestore';
 
 const getFirebaseErrorMessage = (errorCode: string) => {
     switch (errorCode) {
@@ -37,7 +38,9 @@ const Login: React.FC = () => {
         setError(null);
         try {
             if (isSignUp) {
-                await createUserWithEmailAndPassword(auth, email, password);
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                // Create a user document in Firestore
+                await createUserDocument(userCredential.user.uid, userCredential.user.email || '');
             } else {
                 await signInWithEmailAndPassword(auth, email, password);
             }

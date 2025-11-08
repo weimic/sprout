@@ -15,6 +15,9 @@ const firebaseConfig = {
 // Initialize Firebase (guard so it doesn't re-init in Fast Refresh / multiple imports)
 const app: FirebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
+// Export the initialized app for other Firebase services (e.g., Firestore)
+export const firebaseApp = app;
+
 // Auth instance
 export const auth = getAuth(app);
 
@@ -23,6 +26,5 @@ try {
   void setPersistence(auth, browserLocalPersistence);
 } catch (e) {
   // Non-fatal: log for debugging only.
-  // eslint-disable-next-line no-console
   console.warn('Failed to set auth persistence', e);
 }

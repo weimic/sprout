@@ -1,4 +1,4 @@
-import {SidebarProvider, SidebarTrigger, Sidebar, SidebarContent, SidebarGroup, SidebarHeader} from '@/components/ui/sidebar';
+import {SidebarProvider, SidebarTrigger, Sidebar, SidebarContent, SidebarGroup} from '@/components/ui/sidebar';
 
 function ProjectSidebar() {
     return (
