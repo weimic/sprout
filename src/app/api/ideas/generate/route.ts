@@ -35,14 +35,15 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({ model: MODEL });
 
     // Build prompt
-    const baseInstruction = `You are an expert brainstorming partner for rapid ideation. Generate clear, accessible, thought-provoking content optimized for quick scanning and deep exploration. Respond with STRICT JSON only.`;
+    const baseInstruction = `You are an expert Ideation Facilitator, capable of two distinct modes: Generator: For users who need new ideas from scratch. Provocateur: For users who have an existing idea to challenge. Your job is to analyze the user's request, deploy the correct mode, and generate content that is clear, accessible, and concise. Respond with STRICT JSON only.`;
 
     let sysGoal = '';
     if (mode === 'initial') {
-      sysGoal = `Given the user's project context, return exactly three ultra-concise, immediately understandable idea statements or questions. Each should be 3-10 words maximum - crystal clear yet intriguing. Use simple language that sparks curiosity. Examples: "What if time moved backwards?", "A chef who tastes emotions", "Cities that grow like plants". Vary formats: questions, fragments, or "what if" statements. Prioritize clarity and instant comprehension while maintaining intrigue.`;
+      sysGoal = `First, analyze the user's input to determine their primary intent: If Intent = GENERATE (user is lost, asks for 'ideas', 'inspiration', or 'where to start'): Return exactly three creative, ultra-concise idea starters. Use simple, evocative language to spark new concepts. Examples: "A library of lost sounds," "What if plants could vote?", "Rebellion as an art form." If Intent = PROVOKE (user provides a specific idea, project, or context): Return exactly three provocative questions or statements. Challenge their core assumptions, uncover blind spots, or force a new perspective. Examples: "Who does this exclude?", "What if it works too well?", "The opposite is also true." Each item must be 3-15 words maximum. The goal is instant comprehension paired with deep reflection.`;
     } else if (mode === 'related') {
-      sysGoal = `Given the active idea and the project context, plus optional user context, generate exactly three new branching ideas or questions. Keep each to 3-12 words maximum. Use clear, accessible language that anyone can immediately grasp, yet make them thought-provoking enough to spark deeper exploration. Examples: "What if this backfires?", "The opposite perspective", "Hidden costs nobody sees". Balance simplicity with depth - avoid jargon, embrace clarity.`;
+      sysGoal = `Given the active idea/provocation and the original project context, continue the established mode: If the active item is an IDEA STARTER: Generate three new branching ideas that build upon, twist, or are adjacent to the original concept. If the active item is a PROVOCATION: Generate three new follow-up provocations that escalate the challenge, introduce a constraint, or explore a consequence. Keep each to 3-15 words maximum. Be direct, clear, and maintain the creative (Generator) or challenging (Provocateur) tone.`;
     } else {
+      console.error("why");
       sysGoal = `Given the active idea and the project context, write a concise, impactful exploration (2-4 sentences maximum) that reveals one key insight, tension, or creative direction. Be specific and generative. Focus on depth over breadth - one powerful angle is better than surface-level coverage of many. Make every word count.`;
     }
 

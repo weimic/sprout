@@ -51,6 +51,14 @@ export interface Note {
   text: string;
 }
 
+export interface UsefulLink {
+  title: string;
+  url: string;
+  snippet: string;
+  dateAdded: Timestamp | null;
+  order: number; // for manual reordering if needed
+}
+
 export interface WithId<T> {
   id: string;
   data: T;
@@ -64,6 +72,8 @@ const ideasColRef = (userId: string, projectId: string) => collection(projectDoc
 const ideaDocRef = (userId: string, projectId: string, ideaId: string) => doc(ideasColRef(userId, projectId), ideaId);
 const notesColRef = (userId: string, projectId: string) => collection(projectDocRef(userId, projectId), 'notes');
 const noteDocRef = (userId: string, projectId: string, noteId: string) => doc(notesColRef(userId, projectId), noteId);
+const linksColRef = (userId: string, projectId: string) => collection(projectDocRef(userId, projectId), 'usefulLinks');
+const linkDocRef = (userId: string, projectId: string, linkId: string) => doc(linksColRef(userId, projectId), linkId);
 
 // ----- User CRUD -----
 export async function createUserDocument(userId: string, email: string): Promise<void> {
@@ -299,4 +309,64 @@ export async function updateNote(
 
 export async function deleteNote(userId: string, projectId: string, noteId: string): Promise<void> {
   await deleteDoc(noteDocRef(userId, projectId, noteId));
+}
+
+// ----- Useful Link CRUD -----
+export async function createUsefulLink(
+  userId: string,
+  projectId: string,
+  input: { title: string; url: string; snippet: string }
+): Promise<string> {
+  // Get next order number
+  const q = query(linksColRef(userId, projectId), orderBy('order', 'desc'), limit(1));
+  const snap = await getDocs(q);
+  const nextOrder = snap.empty ? 0 : ((snap.docs[0].data().order as number) + 1);
+
+  const ref = await addDoc(linksColRef(userId, projectId), {
+    title: input.title,
+    url: input.url,
+    snippet: input.snippet,
+    dateAdded: serverTimestamp(),
+    order: nextOrder,
+  });
+  return ref.id;
+}
+
+export async function listUsefulLinksForProject(
+  userId: string,
+  projectId: string
+): Promise<WithId<UsefulLink>[]> {
+  const q = query(linksColRef(userId, projectId), orderBy('order', 'asc'));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, data: d.data() as UsefulLink }));
+}
+
+export async function getUsefulLink(
+  userId: string,
+  projectId: string,
+  linkId: string
+): Promise<WithId<UsefulLink> | null> {
+  const d = await getDoc(linkDocRef(userId, projectId, linkId));
+  if (!d.exists()) return null;
+  return { id: d.id, data: d.data() as UsefulLink };
+}
+
+export async function deleteUsefulLink(
+  userId: string,
+  projectId: string,
+  linkId: string
+): Promise<void> {
+  await deleteDoc(linkDocRef(userId, projectId, linkId));
+}
+
+export async function deleteAllUsefulLinks(
+  userId: string,
+  projectId: string
+): Promise<void> {
+  const snap = await getDocs(linksColRef(userId, projectId));
+  const batch = writeBatch(db);
+  snap.docs.forEach((docSnap) => batch.delete(docSnap.ref));
+  if (!snap.empty) {
+    await batch.commit();
+  }
 }

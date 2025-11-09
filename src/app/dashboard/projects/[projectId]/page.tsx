@@ -20,6 +20,7 @@ import Link from "next/link";
 import Canvas from "@/components/canvas/Canvas";
 import { useAuth } from "@/hooks/useAuth";
 import { useRef } from 'react';
+import UsefulLinks from "@/components/UsefulLinks";
 
 function GridToggleButton({ onClick, isActive }: { onClick: () => void; isActive: boolean }) {
     return (
@@ -144,6 +145,18 @@ export default function ProjectPage() {
                                     </div>
                                 </DialogContent>
                             </Dialog>
+                        </SidebarGroup>
+                        <div className="px-2 py-1">
+                            <div className="h-px bg-border my-2" />
+                        </div>
+                        <SidebarGroup>
+                            {user && projectId && data?.mainContext && (
+                                <UsefulLinks 
+                                    userId={user.uid}
+                                    projectId={projectId}
+                                    projectContext={data.mainContext}
+                                />
+                            )}
                         </SidebarGroup>
                     </SidebarContent>
                     <SidebarFooter>
