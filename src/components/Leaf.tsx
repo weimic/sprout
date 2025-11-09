@@ -37,7 +37,7 @@ const Leaf: React.FC<LeafProps> = ({
 			isGenerating={isGenerating}
 			isActive={isActive}
 			onDelete={onDelete}
-			editable={true} // Now editable
+			editable={false} // Titles are not editable, only context can be edited
 		/>
 	);
 };

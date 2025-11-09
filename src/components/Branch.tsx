@@ -50,7 +50,7 @@ const Branch: React.FC<BranchProps> = ({
       isActive={isActive}
       onDelete={onDelete}
       isTrunk={isTrunk}
-      editable={true} // Now editable
+      editable={false} // Titles are not editable, only context can be edited
     />
   );
 };

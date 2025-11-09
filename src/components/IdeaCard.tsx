@@ -84,8 +84,9 @@ function IdeaCard({
       <div
         ref={titleRef}
         contentEditable={editable}
-        role="textbox"
+        role={editable ? "textbox" : "text"}
         aria-label="Idea title"
+        aria-readonly={!editable}
         data-placeholder="Title"
         onFocus={() => {
           if (!editable) return;
@@ -107,8 +108,8 @@ function IdeaCard({
         }}
         suppressContentEditableWarning
         className={cn(
-          'w-full bg-transparent font-semibold text-[1.05rem] outline-none break-words whitespace-pre-wrap min-h-[1.4em] cursor-text',
-          editable && 'hover:bg-gray-50/50 rounded px-1 -mx-1',
+          'w-full bg-transparent font-semibold text-[1.05rem] outline-none break-words whitespace-pre-wrap min-h-[1.4em]',
+          editable ? 'cursor-text hover:bg-gray-50/50 rounded px-1 -mx-1' : 'cursor-default select-text',
           titleClassName
         )}
       >

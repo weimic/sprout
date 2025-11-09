@@ -91,6 +91,13 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
     const [effectiveProjectContext, setEffectiveProjectContext] = useState<string>(projectContext);
     const showGridRef = useRef(showGrid);
     const labelSaveTimeoutRef = useRef<Record<string, number>>({});
+    // Dragging state
+    const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+    const [draggingNoteId, setDraggingNoteId] = useState<string | null>(null);
+    const dragStartRef = useRef<{ itemId: string; startX: number; startY: number; itemStartX: number; itemStartY: number } | null>(null);
+    const noteDragStartRef = useRef<{ noteId: string; startX: number; startY: number; noteStartX: number; noteStartY: number } | null>(null);
+    const positionSaveTimeoutRef = useRef<Record<string, number>>({});
+    const noteSaveTimeoutRef = useRef<Record<string, number>>({});
     // Removed addtlText/content support; focusing on minimal card data
 
     // refs for immediate responsiveness and to avoid stale closures in render
@@ -537,16 +544,22 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
     }, [projectId, userId, itemContextMap, effectiveProjectContext, findOpenSpot]);
 
     // Refresh child ideas: delete existing children and generate new ones
+    // Works for both active item's children AND trunk's initial leaves
     const handleRefreshChildren = useCallback(async () => {
-    if (!activeId || !effectiveProjectContext) return;
-        const activeItem = itemsRef.current.find(i => i.id === activeId);
-        if (!activeItem) return;
+        if (!effectiveProjectContext) return;
+        
+        // Determine parent: use activeId if set, otherwise refresh trunk's children (initial leaves)
+        const parentId = activeId || 'trunk';
+        const parentItem = parentId === 'trunk' ? null : itemsRef.current.find(i => i.id === parentId);
+        const parentLabel = parentId === 'trunk' ? effectiveProjectContext : parentItem?.label;
+        
+        if (parentId !== 'trunk' && !parentItem) return;
         
         try {
             setIsGenerating(true);
             
-            // Find all children of the active item
-            const childrenToDelete = itemsRef.current.filter(i => i.parentId === activeId);
+            // Find all children of the parent (or trunk)
+            const childrenToDelete = itemsRef.current.filter(i => i.parentId === parentId);
             
             // Delete children from Firestore
             await Promise.all(childrenToDelete.map(child => 
@@ -555,20 +568,21 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
             
             // Remove children from state
             setItems((prev) => {
-                const filtered = prev.filter(i => i.parentId !== activeId);
+                const filtered = prev.filter(i => i.parentId !== parentId);
                 itemsRef.current = filtered;
                 return filtered;
             });
             
             // Generate new children
-            const itemContext = itemContextMap[activeId] || '';
+            const itemContext = parentId === 'trunk' ? '' : (itemContextMap[parentId] || '');
+            const mode = parentId === 'trunk' ? 'initial' : 'related';
             const resp = await fetch('/api/ideas/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    mode: 'related', 
+                    mode, 
                     projectContext: effectiveProjectContext, 
-                    parentText: activeItem.label, 
+                    parentText: parentLabel,
                     extraContext: itemContext || undefined 
                 }),
             });
@@ -576,30 +590,63 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
             
             if (json?.ideas?.length) {
                 const newOnes: Item[] = [];
-                const outAngle = Math.atan2(activeItem.y - 0, activeItem.x - 0);
-                const offsets = [-0.5, 0, 0.5];
                 
-                for (let i = 0; i < json.ideas.length; i++) {
-                    const angle = outAngle + offsets[i % offsets.length];
-                    const baseDist = 220 + i * 30;
-                    const targetX = activeItem.x + Math.cos(angle) * baseDist;
-                    const targetY = activeItem.y + Math.sin(angle) * baseDist;
-                    const spot = findOpenSpot(targetX, targetY, 200);
-                    const ideaText = json.ideas[i];
-                    const ideaId = await createIdea(userId, projectId, { 
-                        text: ideaText, 
-                        parentId: activeItem.id, 
-                        x: spot.x, 
-                        y: spot.y 
-                    });
-                    newOnes.push({ 
-                        id: ideaId, 
-                        type: 'leaf', 
-                        x: spot.x, 
-                        y: spot.y, 
-                        label: ideaText, 
-                        parentId: activeItem.id 
-                    });
+                // Layout strategy depends on parent
+                if (parentId === 'trunk') {
+                    // Triangle layout around center for initial leaves
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const cx = (canvas.clientWidth / 2 - txRef.current) / scaleRef.current;
+                    const cy = (canvas.clientHeight / 2 - tyRef.current) / scaleRef.current;
+                    const baseRadius = 380;
+                    const baseAngles = [-Math.PI / 6, Math.PI / 2, Math.PI + Math.PI / 6];
+                    for (let i = 0; i < json.ideas.length; i++) {
+                        const angle = baseAngles[i % baseAngles.length];
+                        const tx = cx + Math.cos(angle) * baseRadius;
+                        const ty = cy + Math.sin(angle) * baseRadius;
+                        const spot = findOpenSpot(tx, ty, 340);
+                        const ideaText = json.ideas[i];
+                        const ideaId = await createIdea(userId, projectId, { 
+                            text: ideaText, 
+                            x: spot.x, 
+                            y: spot.y, 
+                            parentId: 'trunk' 
+                        });
+                        newOnes.push({ 
+                            id: ideaId, 
+                            type: 'leaf', 
+                            x: spot.x, 
+                            y: spot.y, 
+                            label: ideaText, 
+                            parentId: 'trunk' 
+                        });
+                    }
+                } else {
+                    // Radial layout from parent item
+                    const outAngle = Math.atan2(parentItem!.y - 0, parentItem!.x - 0);
+                    const offsets = [-0.5, 0, 0.5];
+                    for (let i = 0; i < json.ideas.length; i++) {
+                        const angle = outAngle + offsets[i % offsets.length];
+                        const baseDist = 220 + i * 30;
+                        const targetX = parentItem!.x + Math.cos(angle) * baseDist;
+                        const targetY = parentItem!.y + Math.sin(angle) * baseDist;
+                        const spot = findOpenSpot(targetX, targetY, 200);
+                        const ideaText = json.ideas[i];
+                        const ideaId = await createIdea(userId, projectId, { 
+                            text: ideaText, 
+                            parentId: parentItem!.id, 
+                            x: spot.x, 
+                            y: spot.y 
+                        });
+                        newOnes.push({ 
+                            id: ideaId, 
+                            type: 'leaf', 
+                            x: spot.x, 
+                            y: spot.y, 
+                            label: ideaText, 
+                            parentId: parentItem!.id 
+                        });
+                    }
                 }
                 
                 setItems((prev) => {
@@ -608,8 +655,10 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
                     return merged;
                 });
             }
-            // Clear the extra context for this item after successful generation
-            setItemContextMap((prev) => ({ ...prev, [activeId]: '' }));
+            // Clear the extra context for this parent after successful generation
+            if (parentId !== 'trunk') {
+                setItemContextMap((prev) => ({ ...prev, [parentId]: '' }));
+            }
         } catch (e) {
             console.error('Failed to refresh child ideas', e);
         } finally {
@@ -683,6 +732,161 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
         }, 500) as unknown as number;
     }, [userId, projectId]);
 
+    // Handle item drag start
+    const handleItemPointerDown = useCallback((e: React.PointerEvent, itemId: string) => {
+        // Prevent drag if clicking on interactive elements
+        const target = e.target as HTMLElement;
+        if (target.contentEditable === 'true' || 
+            target.tagName === 'TEXTAREA' || 
+            target.tagName === 'BUTTON' ||
+            target.tagName === 'INPUT' ||
+            target.closest('button') ||
+            target.closest('textarea')) {
+            return;
+        }
+        
+        e.stopPropagation(); // Prevent canvas panning
+        const item = itemsRef.current.find(i => i.id === itemId);
+        if (!item) return;
+        
+        setDraggingItemId(itemId);
+        dragStartRef.current = {
+            itemId,
+            startX: e.clientX,
+            startY: e.clientY,
+            itemStartX: item.x,
+            itemStartY: item.y,
+        };
+        
+        // Capture pointer to receive events even outside element
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    }, []);
+
+    // Handle item drag move
+    const handleItemPointerMove = useCallback((e: React.PointerEvent, itemId: string) => {
+        if (!dragStartRef.current || dragStartRef.current.itemId !== itemId) return;
+        
+        e.stopPropagation();
+        const { startX, startY, itemStartX, itemStartY } = dragStartRef.current;
+        
+        // Calculate delta in screen space, then convert to world space
+        const deltaScreenX = e.clientX - startX;
+        const deltaScreenY = e.clientY - startY;
+        const deltaWorldX = deltaScreenX / scaleRef.current;
+        const deltaWorldY = deltaScreenY / scaleRef.current;
+        
+        const newX = itemStartX + deltaWorldX;
+        const newY = itemStartY + deltaWorldY;
+        
+        // Update position in state immediately for smooth visual feedback
+        setItems((prev) => prev.map((i) => i.id === itemId ? { ...i, x: newX, y: newY } : i));
+    }, []);
+
+    // Handle item drag end
+    const handleItemPointerUp = useCallback((e: React.PointerEvent, itemId: string) => {
+        if (!dragStartRef.current || dragStartRef.current.itemId !== itemId) return;
+        
+        e.stopPropagation();
+        
+        // Release pointer capture
+        try {
+            (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch {}
+        
+        const item = itemsRef.current.find(i => i.id === itemId);
+        if (!item) return;
+        
+        // Debounce save to Firestore to avoid excessive writes
+        if (positionSaveTimeoutRef.current[itemId]) {
+            window.clearTimeout(positionSaveTimeoutRef.current[itemId]);
+        }
+        
+        positionSaveTimeoutRef.current[itemId] = window.setTimeout(() => {
+            updateIdea(userId, projectId, itemId, { x: item.x, y: item.y }).catch((e) => {
+                console.error('Failed to save item position', e);
+            });
+            delete positionSaveTimeoutRef.current[itemId];
+        }, 300) as unknown as number;
+        
+        setDraggingItemId(null);
+        dragStartRef.current = null;
+    }, [userId, projectId]);
+
+    // Handle note drag start
+    const handleNotePointerDown = useCallback((e: React.PointerEvent, noteId: string) => {
+        // Prevent drag if clicking on textarea
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'TEXTAREA' || target.closest('textarea')) {
+            return;
+        }
+        
+        e.stopPropagation(); // Prevent canvas panning
+        const note = notes.find(n => n.id === noteId);
+        if (!note) return;
+        
+        setDraggingNoteId(noteId);
+        noteDragStartRef.current = {
+            noteId,
+            startX: e.clientX,
+            startY: e.clientY,
+            noteStartX: note.x,
+            noteStartY: note.y,
+        };
+        
+        // Capture pointer to receive events even outside element
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    }, [notes]);
+
+    // Handle note drag move
+    const handleNotePointerMove = useCallback((e: React.PointerEvent, noteId: string) => {
+        if (!noteDragStartRef.current || noteDragStartRef.current.noteId !== noteId) return;
+        
+        e.stopPropagation();
+        const { startX, startY, noteStartX, noteStartY } = noteDragStartRef.current;
+        
+        // Calculate delta in screen space, then convert to world space
+        const deltaScreenX = e.clientX - startX;
+        const deltaScreenY = e.clientY - startY;
+        const deltaWorldX = deltaScreenX / scaleRef.current;
+        const deltaWorldY = deltaScreenY / scaleRef.current;
+        
+        const newX = noteStartX + deltaWorldX;
+        const newY = noteStartY + deltaWorldY;
+        
+        // Update position in state immediately for smooth visual feedback
+        setNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, x: newX, y: newY } : n));
+    }, []);
+
+    // Handle note drag end
+    const handleNotePointerUp = useCallback((e: React.PointerEvent, noteId: string) => {
+        if (!noteDragStartRef.current || noteDragStartRef.current.noteId !== noteId) return;
+        
+        e.stopPropagation();
+        
+        // Release pointer capture
+        try {
+            (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+        } catch {}
+        
+        const note = notes.find(n => n.id === noteId);
+        if (!note) return;
+        
+        // Debounce save to Firestore to avoid excessive writes
+        if (noteSaveTimeoutRef.current[noteId]) {
+            window.clearTimeout(noteSaveTimeoutRef.current[noteId]);
+        }
+        
+        noteSaveTimeoutRef.current[noteId] = window.setTimeout(() => {
+            updateNote(userId, projectId, noteId, { x: note.x, y: note.y }).catch((e) => {
+                console.error('Failed to save note position', e);
+            });
+            delete noteSaveTimeoutRef.current[noteId];
+        }, 300) as unknown as number;
+        
+        setDraggingNoteId(null);
+        noteDragStartRef.current = null;
+    }, [notes, userId, projectId]);
+
     // Handle content change with debouncing
     // Removed content editing handler
 
@@ -722,9 +926,10 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
         applyTransform();
     };
 
-    // pointer events for panning
+    // pointer events for panning and background click detection
     const isPanningRef = useRef(false);
     const startRef = useRef<{ x: number; y: number } | null>(null);
+    const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
 
     const handlePointerDown: React.PointerEventHandler<HTMLCanvasElement> = (e) => {
         const canvas = canvasRef.current;
@@ -732,6 +937,8 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
         (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
         isPanningRef.current = true;
         startRef.current = { x: e.clientX - txRef.current, y: e.clientY - tyRef.current };
+        // Track pointer down position to detect clicks vs. drags
+        pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
     };
 
     const handlePointerMove: React.PointerEventHandler<HTMLCanvasElement> = (e) => {
@@ -750,8 +957,25 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
 
     const handlePointerUp: React.PointerEventHandler<HTMLCanvasElement> = (e) => {
         try { (e.target as HTMLCanvasElement).releasePointerCapture(e.pointerId); } catch {};
+        
+        // Check if this was a click (minimal movement) on the canvas background
+        // Only unfocus if we have an active item and this was a background click
+        if (pointerDownPosRef.current && activeId) {
+            const dx = e.clientX - pointerDownPosRef.current.x;
+            const dy = e.clientY - pointerDownPosRef.current.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            // If pointer moved less than 5 pixels, consider it a click (not a drag)
+            // This unfocuses the active item when clicking on canvas background
+            // Note: Item clicks call stopPropagation() so they won't reach here
+            if (distance < 5) {
+                setActiveId(null);
+            }
+        }
+        
         isPanningRef.current = false;
         startRef.current = null;
+        pointerDownPosRef.current = null;
     };
 
     // Create a new item and persist as an Idea with coordinates
@@ -843,7 +1067,11 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
                     onAddNote={handleAddNote}
                     onCenter={centerView}
                     onRefresh={handleRefreshChildren}
-                    canRefresh={!!activeId && itemsRef.current.some(i => i.parentId === activeId)}
+                    canRefresh={
+                        // Show refresh if there are trunk children (initial leaves) OR active item has children
+                        itemsRef.current.some(i => i.parentId === 'trunk') ||
+                        (!!activeId && itemsRef.current.some(i => i.parentId === activeId))
+                    }
                 />
             </div>
             <CreateIdeaForm
@@ -914,7 +1142,17 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
                         )}
                         {items.map(item => {
                             const isActive = item.id === activeId;
-                            const itemStyle: React.CSSProperties = { position: 'absolute', left: item.x, top: item.y, transform: 'translate(-50%, -50%)', transformOrigin: 'center center', pointerEvents: 'auto' };
+                            const isDragging = item.id === draggingItemId;
+                            const itemStyle: React.CSSProperties = { 
+                                position: 'absolute', 
+                                left: item.x, 
+                                top: item.y, 
+                                transform: 'translate(-50%, -50%)', 
+                                transformOrigin: 'center center', 
+                                pointerEvents: 'auto',
+                                cursor: isDragging ? 'grabbing' : 'grab',
+                                transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+                            };
 
                         const commonProps = {
                             label: item.label,
@@ -931,8 +1169,28 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
                         };
 
                             return (
-                                <div key={item.id} style={itemStyle} className={cn('group transition-transform', isActive ? 'scale-[1.04] z-10' : 'scale-[1.0] z-0')} onClick={() => handleItemClick(item)}>
-                                    <div className={cn('rounded-2xl backdrop-blur-sm', isActive ? 'ring-4 ring-indigo-400/70 shadow-lg' : 'ring-1 ring-black/5 shadow-sm')} style={{ willChange: 'transform' }}>
+                                <div 
+                                    key={item.id} 
+                                    style={itemStyle} 
+                                    className={cn(
+                                        'group',
+                                        isActive ? 'scale-[1.04] z-10' : 'scale-[1.0] z-0',
+                                        isDragging && 'scale-[1.06] z-20 opacity-90'
+                                    )} 
+                                    onClick={() => !isDragging && handleItemClick(item)}
+                                    onPointerDown={(e) => handleItemPointerDown(e, item.id)}
+                                    onPointerMove={(e) => handleItemPointerMove(e, item.id)}
+                                    onPointerUp={(e) => handleItemPointerUp(e, item.id)}
+                                    onPointerCancel={(e) => handleItemPointerUp(e, item.id)}
+                                >
+                                    <div 
+                                        className={cn(
+                                            'rounded-2xl backdrop-blur-sm',
+                                            isActive ? 'ring-4 ring-indigo-400/70 shadow-lg' : 'ring-1 ring-black/5 shadow-sm',
+                                            isDragging && 'ring-4 ring-blue-500/50 shadow-2xl'
+                                        )} 
+                                        style={{ willChange: 'transform' }}
+                                    >
                                         {item.type === 'branch' ? <Branch {...commonProps} className={isActive ? 'bg-gradient-to-br from-amber-50 to-amber-100' : ''} /> : <Leaf {...commonProps} className={isActive ? 'bg-gradient-to-br from-emerald-50 to-emerald-100' : ''} />}
                                     </div>
                                     <div className="absolute -top-2 -right-2 flex gap-1">
@@ -943,6 +1201,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
                     })}
                         {/* Render notes within world layer */}
                         {notes.map((note) => {
+                        const isDraggingNote = note.id === draggingNoteId;
                         const noteStyle: React.CSSProperties = {
                             position: 'absolute',
                             left: note.x,
@@ -950,9 +1209,22 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '',
                             transform: 'translate(-50%, -50%)',
                             transformOrigin: 'center center',
                             pointerEvents: 'auto',
+                            cursor: isDraggingNote ? 'grabbing' : 'grab',
+                            transition: isDraggingNote ? 'none' : 'transform 0.15s ease-out',
                         };
                         return (
-                            <div key={note.id} style={noteStyle} className="transition-transform hover:scale-105 z-5">
+                            <div 
+                                key={note.id} 
+                                style={noteStyle} 
+                                className={cn(
+                                    'hover:scale-105 z-5',
+                                    isDraggingNote && 'scale-110 z-20 opacity-90'
+                                )}
+                                onPointerDown={(e) => handleNotePointerDown(e, note.id)}
+                                onPointerMove={(e) => handleNotePointerMove(e, note.id)}
+                                onPointerUp={(e) => handleNotePointerUp(e, note.id)}
+                                onPointerCancel={(e) => handleNotePointerUp(e, note.id)}
+                            >
                                 <Note
                                     text={note.text}
                                     onChange={(newText) => {
