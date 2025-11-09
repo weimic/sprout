@@ -5,11 +5,13 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Toolbar from './Toolbar';
 import Branch from '../Branch';
 import Leaf from '../Leaf';
+import Note from '../Note';
 import { createIdea, listIdeasForProject, updateIdea, toggleIdeaLiked, deleteIdea } from '../../services/firestore';
+import { createNote, listNotesForProject, updateNote, deleteNote } from '../../services/firestore';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 
-type ItemType = 'branch' | 'leaf';
+type ItemType = 'branch' | 'leaf' | 'note';
 
 interface Item {
     id: string;
@@ -70,6 +72,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
     const [translateX, setTranslateX] = useState<number>(0);
     const [translateY, setTranslateY] = useState<number>(0);
     const [items, setItems] = useState<Item[]>([]);
+    const [notes, setNotes] = useState<Array<{ id: string; x: number; y: number; text: string }>>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [userExtraContext, setUserExtraContext] = useState<string>('');
     const [isGenerating, setIsGenerating] = useState<boolean>(false);
@@ -241,6 +244,18 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
                         content: i.data.addtlText,
                         isLiked: i.data.isLiked,
                         parentId: i.data.parentId,
+                    }))
+                );
+                
+                // Load notes
+                const loadedNotes = await listNotesForProject(userId, projectId);
+                if (cancelled) return;
+                setNotes(
+                    loadedNotes.map((n) => ({
+                        id: n.id,
+                        x: n.data.x,
+                        y: n.data.y,
+                        text: n.data.text,
                     }))
                 );
                 // If no ideas exist yet, generate 3 initial ones based on project context (handled externally via effect)
@@ -645,32 +660,48 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
         const cssHeight = canvas.clientHeight;
         const worldX = (cssWidth / 2 - txRef.current) / scaleRef.current;
         const worldY = (cssHeight / 2 - tyRef.current) / scaleRef.current;
-        const defaultLabel = type === 'branch' ? 'New Branch' : 'New Question';
-        try {
-            const ideaId = await createIdea(userId, projectId, {
-                text: defaultLabel,
-                addtlText: '',
-                x: worldX,
-                y: worldY,
-            });
-            setItems((prev) => {
-                const next = [
-                    ...prev,
-                    {
-                        id: ideaId,
-                        type,
-                        x: worldX,
-                        y: worldY,
-                        label: defaultLabel,
-                        content: '',
-                        isManuallyCreated: true,
-                    },
-                ];
-                itemsRef.current = next;
-                return next;
-            });
-        } catch (err) {
-            console.error('Failed to create idea for canvas item', err);
+        
+        if (type === 'note') {
+            // Create a note
+            try {
+                const noteId = await createNote(userId, projectId, {
+                    x: worldX,
+                    y: worldY,
+                    text: '',
+                });
+                setNotes((prev) => [...prev, { id: noteId, x: worldX, y: worldY, text: '' }]);
+            } catch (err) {
+                console.error('Failed to create note', err);
+            }
+        } else {
+            // Create an idea (branch or leaf)
+            const defaultLabel = type === 'branch' ? 'New Branch' : 'New Question';
+            try {
+                const ideaId = await createIdea(userId, projectId, {
+                    text: defaultLabel,
+                    addtlText: '',
+                    x: worldX,
+                    y: worldY,
+                });
+                setItems((prev) => {
+                    const next = [
+                        ...prev,
+                        {
+                            id: ideaId,
+                            type,
+                            x: worldX,
+                            y: worldY,
+                            label: defaultLabel,
+                            content: '',
+                            isManuallyCreated: true,
+                        },
+                    ];
+                    itemsRef.current = next;
+                    return next;
+                });
+            } catch (err) {
+                console.error('Failed to create idea for canvas item', err);
+            }
         }
     }, [userId, projectId]);
 
@@ -709,6 +740,59 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
                 />
                 {/* Block container */}
                 <div className="absolute inset-0 pointer-events-none">
+                    {/* SVG layer for connection lines */}
+                    <svg 
+                        className="absolute inset-0 w-full h-full pointer-events-none" 
+                        style={{ zIndex: 0 }}
+                    >
+                        {items.map((item) => {
+                            if (!item.parentId) return null;
+                            
+                            // Find parent (either in items or the origin context)
+                            const parent = items.find(i => i.id === item.parentId);
+                            if (!parent) {
+                                // Check if parent is the origin (project context at 0,0)
+                                const parentX = 0;
+                                const parentY = 0;
+                                const childScreenX = item.x * scale + translateX;
+                                const childScreenY = item.y * scale + translateY;
+                                const parentScreenX = parentX * scale + translateX;
+                                const parentScreenY = parentY * scale + translateY;
+                                
+                                return (
+                                    <line
+                                        key={`line-${item.id}`}
+                                        x1={parentScreenX}
+                                        y1={parentScreenY}
+                                        x2={childScreenX}
+                                        y2={childScreenY}
+                                        stroke="rgba(147, 197, 253, 0.4)"
+                                        strokeWidth="2"
+                                        strokeDasharray="5,5"
+                                    />
+                                );
+                            }
+                            
+                            const parentScreenX = parent.x * scale + translateX;
+                            const parentScreenY = parent.y * scale + translateY;
+                            const childScreenX = item.x * scale + translateX;
+                            const childScreenY = item.y * scale + translateY;
+                            
+                            return (
+                                <line
+                                    key={`line-${item.id}`}
+                                    x1={parentScreenX}
+                                    y1={parentScreenY}
+                                    x2={childScreenX}
+                                    y2={childScreenY}
+                                    stroke="rgba(147, 197, 253, 0.4)"
+                                    strokeWidth="2"
+                                    strokeDasharray="5,5"
+                                />
+                            );
+                        })}
+                    </svg>
+                    
                     {(() => {
                         const contextEl = typeof document !== 'undefined' ? document.querySelector('[data-project-main-context]') : null;
                         const projectContext = contextEl?.textContent?.trim() || '';
@@ -791,6 +875,36 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' 
                                         title={item.isLiked ? 'Unlike' : 'Like'}
                                     >{item.isLiked ? '♥' : '♡'}</button>
                                 </div>
+                            </div>
+                        );
+                    })}
+                    {/* Render notes */}
+                    {notes.map((note) => {
+                        const screenX = note.x * scale + translateX;
+                        const screenY = note.y * scale + translateY;
+                        
+                        const noteStyle: React.CSSProperties = {
+                            position: 'absolute',
+                            left: screenX,
+                            top: screenY,
+                            transform: `translate(-50%, -50%)`,
+                            transformOrigin: 'center center',
+                            pointerEvents: 'auto',
+                        };
+
+                        return (
+                            <div
+                                key={note.id}
+                                style={noteStyle}
+                                className="transition-transform hover:scale-105 z-5"
+                            >
+                                <Note
+                                    text={note.text}
+                                    onChange={(newText) => {
+                                        setNotes((prev) => prev.map((n) => n.id === note.id ? { ...n, text: newText } : n));
+                                        updateNote(userId, projectId, note.id, { text: newText }).catch(() => {});
+                                    }}
+                                />
                             </div>
                         );
                     })}

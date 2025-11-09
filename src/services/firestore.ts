@@ -45,6 +45,12 @@ export interface Idea {
   y?: number;
 }
 
+export interface Note {
+  x: number;
+  y: number;
+  text: string;
+}
+
 export interface WithId<T> {
   id: string;
   data: T;
@@ -56,6 +62,8 @@ const projectsColRef = (userId: string) => collection(userDocRef(userId), 'proje
 const projectDocRef = (userId: string, projectId: string) => doc(projectsColRef(userId), projectId);
 const ideasColRef = (userId: string, projectId: string) => collection(projectDocRef(userId, projectId), 'ideas');
 const ideaDocRef = (userId: string, projectId: string, ideaId: string) => doc(ideasColRef(userId, projectId), ideaId);
+const notesColRef = (userId: string, projectId: string) => collection(projectDocRef(userId, projectId), 'notes');
+const noteDocRef = (userId: string, projectId: string, noteId: string) => doc(notesColRef(userId, projectId), noteId);
 
 // ----- User CRUD -----
 export async function createUserDocument(userId: string, email: string): Promise<void> {
@@ -246,4 +254,49 @@ export async function createCanvasBlockWithIdea(
     directionFromParent,
   };
   return block;
+}
+
+// ----- Note CRUD -----
+export async function createNote(
+  userId: string,
+  projectId: string,
+  input: { x: number; y: number; text: string }
+): Promise<string> {
+  const ref = await addDoc(notesColRef(userId, projectId), {
+    x: input.x,
+    y: input.y,
+    text: input.text,
+  } satisfies Note);
+  return ref.id;
+}
+
+export async function listNotesForProject(
+  userId: string,
+  projectId: string
+): Promise<WithId<Note>[]> {
+  const snap = await getDocs(notesColRef(userId, projectId));
+  return snap.docs.map((d) => ({ id: d.id, data: d.data() as Note }));
+}
+
+export async function getNote(
+  userId: string,
+  projectId: string,
+  noteId: string
+): Promise<WithId<Note> | null> {
+  const d = await getDoc(noteDocRef(userId, projectId, noteId));
+  if (!d.exists()) return null;
+  return { id: d.id, data: d.data() as Note };
+}
+
+export async function updateNote(
+  userId: string,
+  projectId: string,
+  noteId: string,
+  update: Partial<Note>
+): Promise<void> {
+  await updateDoc(noteDocRef(userId, projectId, noteId), update as Partial<Note>);
+}
+
+export async function deleteNote(userId: string, projectId: string, noteId: string): Promise<void> {
+  await deleteDoc(noteDocRef(userId, projectId, noteId));
 }

@@ -27,12 +27,20 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
   isActive = false,
 }) => {
   const [localExtraContext, setLocalExtraContext] = useState(extraContext);
+  const titleRef = React.useRef<HTMLDivElement>(null);
   const showGenerateButton = isActive && localExtraContext.trim().length > 0;
 
   const handleExtraContextChange = (value: string) => {
     setLocalExtraContext(value);
     onExtraContextChange?.(value);
   };
+
+  // Sync label to contentEditable when it changes externally
+  React.useEffect(() => {
+    if (titleRef.current && titleRef.current.textContent !== label) {
+      titleRef.current.textContent = label;
+    }
+  }, [label]);
 
   return (
     <div
@@ -43,19 +51,27 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
       style={{ minWidth: 240, maxWidth: 360, padding: '0.9rem 1rem', ...style }}
     >
       <div
+        ref={titleRef}
         contentEditable
         role="textbox"
         aria-label="Idea title"
         data-placeholder="Title"
-        onInput={(e) => onLabelChange((e.target as HTMLDivElement).innerText)}
-        onBlur={(e) => onLabelChange((e.target as HTMLDivElement).innerText.trim())}
+        onInput={(e) => {
+          const text = (e.target as HTMLDivElement).textContent || '';
+          onLabelChange(text);
+        }}
+        onBlur={(e) => {
+          const text = ((e.target as HTMLDivElement).textContent || '').trim();
+          onLabelChange(text);
+        }}
         suppressContentEditableWarning
         className={cn(
           'w-full bg-transparent font-semibold text-[1.05rem] outline-none break-words whitespace-pre-wrap min-h-[1.4em]',
           titleClassName
         )}
-        dangerouslySetInnerHTML={{ __html: label }}
-      />
+      >
+        {label}
+      </div>
       
       {isActive && (
         <div className="mt-3 pt-3 border-t border-gray-200/50 space-y-2">

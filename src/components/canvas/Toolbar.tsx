@@ -4,7 +4,7 @@ import { Button } from '../ui/button';
 
 
 interface ToolbarProps {
-    addItem: (type: 'branch' | 'leaf') => void;
+    addItem: (type: 'branch' | 'leaf' | 'note') => void;
     onCenter: () => void;
     onRefresh?: () => void;
     canRefresh?: boolean;
@@ -27,6 +27,14 @@ const Toolbar: React.FC<ToolbarProps> = ({ addItem, onCenter, onRefresh, canRefr
                     className="px-4 py-2"
                 >
                     Add Leaf
+                </Button>
+                <Button 
+                    variant="outline"
+                    onClick={() => addItem('note')}
+                    className="px-4 py-2 bg-yellow-50 hover:bg-yellow-100 border-yellow-300"
+                    title="Add a sticky note"
+                >
+                    📝 Add Note
                 </Button>
                 <Button 
                     variant="outline"
