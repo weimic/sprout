@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React from 'react';
 import { cn } from '@/lib/utils';
 import IdeaCard from './IdeaCard';
 
@@ -11,6 +11,8 @@ interface BranchProps {
   onGenerateMore?: () => void;
   isGenerating?: boolean;
   isActive?: boolean;
+  isTrunk?: boolean; // Identifies the root/trunk branch
+  onDelete?: () => void;
 }
 
 const Branch: React.FC<BranchProps> = ({ 
@@ -22,22 +24,35 @@ const Branch: React.FC<BranchProps> = ({
   onGenerateMore,
   isGenerating,
   isActive,
+  isTrunk = false,
+  onDelete,
 }) => {
   return (
     <IdeaCard
       label={label}
       onLabelChange={(newLabel) => onChange?.(newLabel)}
       style={{ minWidth: 260, maxWidth: 380 }}
-      className={cn('border-amber-200/70', className)}
-      titleClassName="text-amber-900 placeholder:text-amber-800/60"
+      className={cn(
+        isTrunk 
+          ? 'border-amber-600/90 bg-gradient-to-br from-amber-100 to-amber-200/95 ring-2 ring-amber-500/40 shadow-lg' 
+          : 'border-amber-200/70',
+        className
+      )}
+      titleClassName={cn(
+        isTrunk 
+          ? 'text-amber-950 placeholder:text-amber-900/70 font-bold text-lg' 
+          : 'text-amber-900 placeholder:text-amber-800/60'
+      )}
       extraContext={extraContext}
       onExtraContextChange={onExtraContextChange}
       onGenerateMore={onGenerateMore}
       isGenerating={isGenerating}
       isActive={isActive}
-      editable={false} // Titles are not editable directly on the card
+      onDelete={onDelete}
+      isTrunk={isTrunk}
+      editable={true} // Now editable
     />
   );
 };
 
-export default Branch;
+export default React.memo(Branch);

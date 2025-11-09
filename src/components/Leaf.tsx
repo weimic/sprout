@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React from 'react';
 import { cn } from '@/lib/utils';
 import IdeaCard from './IdeaCard';
 
@@ -11,6 +11,7 @@ interface LeafProps {
     onGenerateMore?: () => void;
     isGenerating?: boolean;
     isActive?: boolean;
+    onDelete?: () => void;
 }
 
 const Leaf: React.FC<LeafProps> = ({ 
@@ -22,6 +23,7 @@ const Leaf: React.FC<LeafProps> = ({
 	onGenerateMore,
 	isGenerating,
 	isActive,
+	onDelete,
 }) => {
 	return (
 		<IdeaCard
@@ -34,9 +36,10 @@ const Leaf: React.FC<LeafProps> = ({
 			onGenerateMore={onGenerateMore}
 			isGenerating={isGenerating}
 			isActive={isActive}
-			editable={false} // Titles are not editable directly on the card
+			onDelete={onDelete}
+			editable={true} // Now editable
 		/>
 	);
 };
 
-export default Leaf;
+export default React.memo(Leaf);

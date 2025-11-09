@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { cn } from '@/lib/utils';
 
-interface IdeaCardProps {
+export interface IdeaCardProps {
   label: string;
   onLabelChange: (newLabel: string) => void;
   style?: React.CSSProperties;
@@ -13,9 +13,11 @@ interface IdeaCardProps {
   isGenerating?: boolean;
   isActive?: boolean;
   editable?: boolean; // controls whether the title is user-editable
+  onDelete?: () => void; // delete handler
+  isTrunk?: boolean; // special styling for trunk
 }
 
-const IdeaCard: React.FC<IdeaCardProps> = ({
+function IdeaCard({
   label,
   onLabelChange,
   style,
@@ -26,17 +28,27 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
   onGenerateMore,
   isGenerating = false,
   isActive = false,
-  editable = false,
-}) => {
+  editable = true,
+  onDelete,
+  isTrunk = false,
+}: IdeaCardProps) {
   const [localExtraContext, setLocalExtraContext] = useState(extraContext);
   const titleRef = React.useRef<HTMLDivElement>(null);
   const isUserEditingRef = React.useRef(false);
   const showGenerateButton = isActive && localExtraContext.trim().length > 0;
 
+  // Sync extraContext prop to local state when it changes externally (e.g., when switching between items)
+  React.useEffect(() => {
+    setLocalExtraContext(extraContext);
+  }, [extraContext]);
+
+  // Sync content prop to local state
+
   const handleExtraContextChange = (value: string) => {
     setLocalExtraContext(value);
     onExtraContextChange?.(value);
   };
+
 
   // Sync label to contentEditable when it changes externally (but NOT during user editing)
   React.useEffect(() => {
@@ -48,11 +60,27 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border bg-white/95 shadow-sm hover:shadow-md transition-colors',
+        'rounded-xl border bg-white/95 shadow-sm hover:shadow-md transition-all relative group',
         className
       )}
       style={{ minWidth: 240, maxWidth: 360, padding: '0.9rem 1rem', ...style }}
     >
+      {/* Delete button - only show if onDelete is provided and not trunk */}
+      {onDelete && !isTrunk && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (window.confirm('Delete this item and all its children?')) {
+              onDelete();
+            }
+          }}
+          className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 hover:bg-red-600 hover:scale-110 transition-all duration-200 flex items-center justify-center text-xs font-bold shadow-md z-10"
+          title="Delete"
+        >
+          ×
+        </button>
+      )}
+      
       <div
         ref={titleRef}
         contentEditable={editable}
@@ -74,13 +102,13 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
           const text = ((e.target as HTMLDivElement).textContent || '').trim();
           onLabelChange(text);
         }}
-        onClick={(e) => {
-          // Only stop propagation if editing is enabled; otherwise allow selection click to bubble
-          if (editable) e.stopPropagation();
+        onClick={(_) => {
+          // Allow clicks on the title to bubble so the parent can focus/select the card
         }}
         suppressContentEditableWarning
         className={cn(
-          'w-full bg-transparent font-semibold text-[1.05rem] outline-none break-words whitespace-pre-wrap min-h-[1.4em]',
+          'w-full bg-transparent font-semibold text-[1.05rem] outline-none break-words whitespace-pre-wrap min-h-[1.4em] cursor-text',
+          editable && 'hover:bg-gray-50/50 rounded px-1 -mx-1',
           titleClassName
         )}
       >
@@ -113,6 +141,6 @@ const IdeaCard: React.FC<IdeaCardProps> = ({
       )}
     </div>
   );
-};
+}
 
-export default IdeaCard;
+export default React.memo(IdeaCard);

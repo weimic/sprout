@@ -63,18 +63,32 @@ export default function ProjectPage() {
     const gridToggleRef = useRef<(() => void) | null>(null);
     const gridStateRef = useRef<(() => boolean) | null>(null);
     const [gridActive, setGridActive] = useState(false);
+    const autoToggleRef = useRef<(() => void) | null>(null);
+    const autoStateRef = useRef<(() => boolean) | null>(null);
+    const [autoGenActive, setAutoGenActive] = useState(true);
     
     const handleGridToggleReady = (toggleFn: () => void, getState: () => boolean) => {
         gridToggleRef.current = toggleFn;
         gridStateRef.current = getState;
     };
+    const handleAutoToggleReady = (toggleFn: () => void, getState: () => boolean) => {
+        autoToggleRef.current = toggleFn;
+        autoStateRef.current = getState;
+    };
     
     const handleGridButtonClick = () => {
         if (gridToggleRef.current) {
             gridToggleRef.current();
-            // Update button state
             if (gridStateRef.current) {
                 setTimeout(() => setGridActive(gridStateRef.current!()), 0);
+            }
+        }
+    };
+    const handleAutoGenButtonClick = () => {
+        if (autoToggleRef.current) {
+            autoToggleRef.current();
+            if (autoStateRef.current) {
+                setTimeout(() => setAutoGenActive(autoStateRef.current!()), 0);
             }
         }
     };
@@ -96,6 +110,7 @@ export default function ProjectPage() {
                             projectId={projectId} 
                             projectContext={data?.mainContext || ''} 
                             onGridToggleReady={handleGridToggleReady}
+                            onAutoToggleReady={handleAutoToggleReady}
                         />
                     )}
                 </main>
@@ -132,9 +147,19 @@ export default function ProjectPage() {
                         </SidebarGroup>
                     </SidebarContent>
                     <SidebarFooter>
-                        <Button className="flex items-center gap-2">
-                            <Link className="w-full" href="/dashboard">Return</Link>
-                        </Button>
+                        <div className="flex flex-col w-full gap-2">
+                            <Button 
+                                className="flex items-center gap-2 w-full" 
+                                variant={autoGenActive ? 'default' : 'outline'}
+                                onClick={handleAutoGenButtonClick}
+                                title={autoGenActive ? 'Disable auto-generation' : 'Enable auto-generation'}
+                            >
+                                {autoGenActive ? 'Auto-Gen: On' : 'Auto-Gen: Off'}
+                            </Button>
+                            <Button className="flex items-center gap-2 w-full">
+                                <Link className="w-full" href="/dashboard">Return</Link>
+                            </Button>
+                        </div>
                     </SidebarFooter>
                 </Sidebar>
             </SidebarProvider>
