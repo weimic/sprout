@@ -5,7 +5,9 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import Toolbar from './Toolbar';
 import Branch from '../Branch';
 import Leaf from '../Leaf';
-import { createIdea, listIdeasForProject, updateIdea } from '../../services/firestore';
+import { createIdea, listIdeasForProject, updateIdea, toggleIdeaLiked, deleteIdea } from '../../services/firestore';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 type ItemType = 'branch' | 'leaf';
 
@@ -15,7 +17,10 @@ interface Item {
     x: number; // world coordinates
     y: number; // world coordinates
     label: string;
-    content?: string;
+    content?: string; // addtlText
+    isLiked?: boolean;
+    parentId?: string; // track parent relationship
+    isManuallyCreated?: boolean; // skip auto-generation for manual items
 }
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
@@ -56,14 +61,18 @@ const smoothTransition = (
 interface CanvasProps {
     userId: string;
     projectId: string;
+    projectContext?: string; // provide from page to avoid DOM query races
 }
 
-const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
+const Canvas: React.FC<CanvasProps> = ({ userId, projectId, projectContext = '' }) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const [scale, setScale] = useState<number>(1);
     const [translateX, setTranslateX] = useState<number>(0);
     const [translateY, setTranslateY] = useState<number>(0);
     const [items, setItems] = useState<Item[]>([]);
+    const [activeId, setActiveId] = useState<string | null>(null);
+    const [userExtraContext, setUserExtraContext] = useState<string>('');
+    const [isGenerating, setIsGenerating] = useState<boolean>(false);
     const [isAtEdge, setIsAtEdge] = useState(false);
     const edgeTimeoutRef = useRef<number | null>(null);
 
@@ -230,8 +239,11 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
                         y: i.data.y ?? 0,
                         label: i.data.text,
                         content: i.data.addtlText,
+                        isLiked: i.data.isLiked,
+                        parentId: i.data.parentId,
                     }))
                 );
+                // If no ideas exist yet, generate 3 initial ones based on project context (handled externally via effect)
             } catch (err) {
                 console.error('Failed to load ideas for canvas', err);
             }
@@ -241,6 +253,318 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
             cancelled = true;
         };
     }, [userId, projectId]);
+
+    // Utility: find a non-overlapping position near a target using increasing radius
+    const findOpenSpot = useCallback((targetX: number, targetY: number, minDist = 320) => {
+        const positions = itemsRef.current.map((i) => ({ x: i.x, y: i.y }));
+        // also avoid overlapping with origin where the context card sits
+        positions.push({ x: 0, y: 0 });
+        let radius = 0;
+        let angle = 0;
+        for (let iter = 0; iter < 64; iter++) {
+            const x = targetX + Math.cos(angle) * radius;
+            const y = targetY + Math.sin(angle) * radius;
+            const ok = positions.every((p) => {
+                const dx = x - p.x; const dy = y - p.y; return Math.hypot(dx, dy) > minDist;
+            });
+            if (ok) return { x, y };
+            radius += 32; angle += Math.PI / 7;
+        }
+        return { x: targetX + radius, y: targetY };
+    }, []);
+
+    // Auto-generate initial ideas if project empty and a main context is available
+    useEffect(() => {
+        const runInitial = async () => {
+            if (!userId || !projectId) return;
+            if (itemsRef.current.length > 0) return; // already have ideas
+            if (!projectContext) return;
+            setIsGenerating(true);
+            try {
+                const resp = await fetch('/api/ideas/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: 'initial', projectContext }),
+                });
+                const json = await resp.json();
+                if (json?.ideas?.length) {
+                    // Layout: triangle around center to feel spacious/flowchart-like
+                    const canvas = canvasRef.current;
+                    if (!canvas) return;
+                    const cx = (canvas.clientWidth / 2 - txRef.current) / scaleRef.current;
+                    const cy = (canvas.clientHeight / 2 - tyRef.current) / scaleRef.current;
+                    const created: Item[] = [];
+                    const baseRadius = 380;
+                    const baseAngles = [-Math.PI / 6, Math.PI / 2, Math.PI + Math.PI / 6]; // roughly top, left, right triangle pattern
+                    for (let i = 0; i < json.ideas.length; i++) {
+                        const angle = baseAngles[i % baseAngles.length];
+                        const tx = cx + Math.cos(angle) * baseRadius;
+                        const ty = cy + Math.sin(angle) * baseRadius;
+                        const spot = findOpenSpot(tx, ty, 340);
+                        const ideaText = json.ideas[i];
+                        const ideaId = await createIdea(userId, projectId, { text: ideaText, x: spot.x, y: spot.y });
+                        created.push({ id: ideaId, type: 'leaf', x: spot.x, y: spot.y, label: ideaText });
+                    }
+                    setItems(created);
+                    itemsRef.current = created;
+                }
+            } catch (e) {
+                console.error('Initial idea generation failed', e);
+            } finally {
+                setIsGenerating(false);
+            }
+        };
+        void runInitial();
+    }, [userId, projectId, projectContext, findOpenSpot]);
+
+    // Handle clicking an item: make active, center view smoothly, fetch addtlText if missing
+    const handleItemClick = useCallback(async (item: Item) => {
+        setActiveId(item.id);
+        setUserExtraContext(''); // Clear context when switching ideas
+        
+        // If item lacks content in state, try fetching from Firestore first
+        if (!item.content) {
+            try {
+                const ideaFromDb = await listIdeasForProject(userId, projectId);
+                const ideaData = ideaFromDb.find(i => i.id === item.id);
+                if (ideaData?.data.addtlText) {
+                    // Update state with the content from Firestore
+                    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, content: ideaData.data.addtlText } : i));
+                    // Notify sidebar with the fetched content
+                    try {
+                        document.dispatchEvent(new CustomEvent('active-idea', { detail: { id: item.id, text: item.label, addtlText: ideaData.data.addtlText } }));
+                    } catch {}
+                } else {
+                    // Only notify sidebar with current data if no content in DB either
+                    try {
+                        document.dispatchEvent(new CustomEvent('active-idea', { detail: { id: item.id, text: item.label, addtlText: '' } }));
+                    } catch {}
+                }
+            } catch (e) {
+                console.error('Failed to fetch idea from Firestore', e);
+                // Notify sidebar with current data on error
+                try {
+                    document.dispatchEvent(new CustomEvent('active-idea', { detail: { id: item.id, text: item.label, addtlText: item.content || '' } }));
+                } catch {}
+            }
+        } else {
+            // Notify sidebar immediately with current data
+            try {
+                document.dispatchEvent(new CustomEvent('active-idea', { detail: { id: item.id, text: item.label, addtlText: item.content || '' } }));
+            } catch {}
+        }
+        
+        // Center view on item
+        const canvas = canvasRef.current;
+        if (canvas) {
+            const cssWidth = canvas.clientWidth;
+            const cssHeight = canvas.clientHeight;
+            const targetScreenX = cssWidth / 2;
+            const targetScreenY = cssHeight / 2;
+            const currentScreenX = item.x * scaleRef.current + txRef.current;
+            const currentScreenY = item.y * scaleRef.current + tyRef.current;
+            // new translate to move item to center
+            const newTxTarget = txRef.current + (targetScreenX - currentScreenX);
+            const newTyTarget = tyRef.current + (targetScreenY - currentScreenY);
+            smoothTransition(txRef.current, newTxTarget, (v) => { txRef.current = v; setTranslateX(v); });
+            smoothTransition(tyRef.current, newTyTarget, (v) => { tyRef.current = v; setTranslateY(v); });
+        }
+        
+        // Only generate addtlText if: no content exists (in state or DB), not manually created, and hasn't been generated before
+        if (!item.content && !item.isManuallyCreated && projectContext) {
+            try {
+                setIsGenerating(true);
+                const resp = await fetch('/api/ideas/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: 'addtl', projectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
+                });
+                const json = await resp.json();
+                if (json?.addtlText) {
+                    setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, content: json.addtlText } : i));
+                    updateIdea(userId, projectId, item.id, { addtlText: json.addtlText }).catch(() => {});
+                    try {
+                        document.dispatchEvent(new CustomEvent('active-idea', { detail: { id: item.id, text: item.label, addtlText: json.addtlText } }));
+                    } catch {}
+                }
+            } catch (e) {
+                console.error('Failed to get addtlText', e);
+            } finally {
+                setIsGenerating(false);
+            }
+        }
+        
+        // Auto-generate child ideas for AI-generated items (skip manually created ones)
+        if (!item.isManuallyCreated && !item.parentId) {
+            // Only generate if this item doesn't already have children
+            const hasChildren = itemsRef.current.some(i => i.parentId === item.id);
+            if (!hasChildren && projectContext) {
+                try {
+                    setIsGenerating(true);
+                    const resp = await fetch('/api/ideas/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ mode: 'related', projectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
+                    });
+                    const json = await resp.json();
+                    if (json?.ideas?.length) {
+                        const newOnes: Item[] = [];
+                        const outAngle = Math.atan2(item.y - 0, item.x - 0);
+                        const offsets = [-0.5, 0, 0.5];
+                        for (let i = 0; i < json.ideas.length; i++) {
+                            const angle = outAngle + offsets[i % offsets.length];
+                            const baseDist = 380 + i * 50;
+                            const targetX = item.x + Math.cos(angle) * baseDist;
+                            const targetY = item.y + Math.sin(angle) * baseDist;
+                            const spot = findOpenSpot(targetX, targetY, 340);
+                            const ideaText = json.ideas[i];
+                            const ideaId = await createIdea(userId, projectId, { text: ideaText, parentId: item.id, x: spot.x, y: spot.y });
+                            newOnes.push({ id: ideaId, type: 'leaf', x: spot.x, y: spot.y, label: ideaText, parentId: item.id });
+                        }
+                        setItems((prev) => {
+                            const merged = [...prev, ...newOnes];
+                            itemsRef.current = merged;
+                            return merged;
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to generate child ideas', e);
+                } finally {
+                    setIsGenerating(false);
+                }
+            }
+        }
+    }, [projectId, userId, userExtraContext, projectContext, findOpenSpot]);
+
+    // Generate related ideas (3) branching from active item with user's extra context
+    const handleGenerateMore = useCallback(async (item: Item) => {
+        if (!projectContext) return;
+        try {
+            setIsGenerating(true);
+            const resp = await fetch('/api/ideas/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'related', projectContext, parentText: item.label, extraContext: userExtraContext || undefined }),
+            });
+            const json = await resp.json();
+            if (json?.ideas?.length) {
+                const newOnes: Item[] = [];
+                // preferred outward direction from origin
+                const outAngle = Math.atan2(item.y - 0, item.x - 0);
+                const offsets = [-0.5, 0, 0.5]; // radians offsets for branching feel
+                for (let i = 0; i < json.ideas.length; i++) {
+                    const angle = outAngle + offsets[i % offsets.length];
+                    const baseDist = 380 + i * 50;
+                    const targetX = item.x + Math.cos(angle) * baseDist;
+                    const targetY = item.y + Math.sin(angle) * baseDist;
+                    const spot = findOpenSpot(targetX, targetY, 340);
+                    const ideaText = json.ideas[i];
+                    const ideaId = await createIdea(userId, projectId, { text: ideaText, parentId: item.id, x: spot.x, y: spot.y });
+                    newOnes.push({ id: ideaId, type: 'leaf', x: spot.x, y: spot.y, label: ideaText, parentId: item.id });
+                }
+                setItems((prev) => {
+                    const merged = [...prev, ...newOnes];
+                    itemsRef.current = merged;
+                    return merged;
+                });
+            }
+            // Clear the extra context after successful generation
+            setUserExtraContext('');
+        } catch (e) {
+            console.error('Related idea generation failed', e);
+        } finally {
+            setIsGenerating(false);
+        }
+    }, [projectId, userId, userExtraContext, projectContext, findOpenSpot]);
+
+    // Refresh child ideas: delete existing children and generate new ones
+    const handleRefreshChildren = useCallback(async () => {
+        if (!activeId || !projectContext) return;
+        const activeItem = itemsRef.current.find(i => i.id === activeId);
+        if (!activeItem) return;
+        
+        try {
+            setIsGenerating(true);
+            
+            // Find all children of the active item
+            const childrenToDelete = itemsRef.current.filter(i => i.parentId === activeId);
+            
+            // Delete children from Firestore
+            await Promise.all(childrenToDelete.map(child => 
+                deleteIdea(userId, projectId, child.id)
+            ));
+            
+            // Remove children from state
+            setItems((prev) => {
+                const filtered = prev.filter(i => i.parentId !== activeId);
+                itemsRef.current = filtered;
+                return filtered;
+            });
+            
+            // Generate new children
+            const resp = await fetch('/api/ideas/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    mode: 'related', 
+                    projectContext, 
+                    parentText: activeItem.label, 
+                    extraContext: userExtraContext || undefined 
+                }),
+            });
+            const json = await resp.json();
+            
+            if (json?.ideas?.length) {
+                const newOnes: Item[] = [];
+                const outAngle = Math.atan2(activeItem.y - 0, activeItem.x - 0);
+                const offsets = [-0.5, 0, 0.5];
+                
+                for (let i = 0; i < json.ideas.length; i++) {
+                    const angle = outAngle + offsets[i % offsets.length];
+                    const baseDist = 380 + i * 50;
+                    const targetX = activeItem.x + Math.cos(angle) * baseDist;
+                    const targetY = activeItem.y + Math.sin(angle) * baseDist;
+                    const spot = findOpenSpot(targetX, targetY, 340);
+                    const ideaText = json.ideas[i];
+                    const ideaId = await createIdea(userId, projectId, { 
+                        text: ideaText, 
+                        parentId: activeItem.id, 
+                        x: spot.x, 
+                        y: spot.y 
+                    });
+                    newOnes.push({ 
+                        id: ideaId, 
+                        type: 'leaf', 
+                        x: spot.x, 
+                        y: spot.y, 
+                        label: ideaText, 
+                        parentId: activeItem.id 
+                    });
+                }
+                
+                setItems((prev) => {
+                    const merged = [...prev, ...newOnes];
+                    itemsRef.current = merged;
+                    return merged;
+                });
+            }
+            // Clear the extra context after successful generation
+            setUserExtraContext('');
+        } catch (e) {
+            console.error('Failed to refresh child ideas', e);
+        } finally {
+            setIsGenerating(false);
+        }
+    }, [activeId, projectId, userId, userExtraContext, projectContext, findOpenSpot]);
+
+    const handleToggleLike = useCallback(async (id: string) => {
+        try {
+            await toggleIdeaLiked(userId, projectId, id);
+            setItems((prev) => prev.map((i) => i.id === id ? { ...i, isLiked: !i.isLiked } : i));
+        } catch (e) {
+            console.error('Toggle like failed', e);
+        }
+    }, [projectId, userId]);
 
     // schedule renders when transform/scale/items change
     useEffect(() => {
@@ -339,6 +663,7 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
                         y: worldY,
                         label: defaultLabel,
                         content: '',
+                        isManuallyCreated: true,
                     },
                 ];
                 itemsRef.current = next;
@@ -354,7 +679,12 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
         <div className="absolute inset-0 flex flex-col overflow-hidden bg-background">
             {/* Top toolbar - always visible */}
             <div className="w-full flex-none z-10 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75 border-b">
-                <Toolbar addItem={addItem} onCenter={centerView}/>
+                <Toolbar 
+                    addItem={addItem} 
+                    onCenter={centerView}
+                    onRefresh={handleRefreshChildren}
+                    canRefresh={!!activeId && itemsRef.current.some(i => i.parentId === activeId)}
+                />
             </div>
             {/* Canvas container - fills remaining space */}
             <div className="flex-1 relative overflow-hidden">
@@ -379,61 +709,102 @@ const Canvas: React.FC<CanvasProps> = ({ userId, projectId }) => {
                 />
                 {/* Block container */}
                 <div className="absolute inset-0 pointer-events-none">
-                    {items.map((item) => {
-                        const screenX = item.x * scale + translateX;
-                        const screenY = item.y * scale + translateY;
+                    {(() => {
+                        const contextEl = typeof document !== 'undefined' ? document.querySelector('[data-project-main-context]') : null;
+                        const projectContext = contextEl?.textContent?.trim() || '';
+                        if (!projectContext) return null;
+                        const screenX = 0 * scale + translateX;
+                        const screenY = 0 * scale + translateY;
                         const style: React.CSSProperties = {
                             position: 'absolute',
                             left: screenX,
                             top: screenY,
-                            transform: `translate(-50%, -50%) scale(${scale})`,
+                            transform: `translate(-50%, -50%)`,
                             transformOrigin: 'center center',
-                            zIndex: 2,
+                            zIndex: 1,
+                            pointerEvents: 'none',
+                        };
+                        return (
+                            <div style={style}>
+                                <Branch label={projectContext} />
+                            </div>
+                        );
+                    })()}
+                    {items.map((item) => {
+                        const screenX = item.x * scale + translateX;
+                        const screenY = item.y * scale + translateY;
+                        const isActive = item.id === activeId;
+                        
+                        const itemStyle: React.CSSProperties = {
+                            position: 'absolute',
+                            left: screenX,
+                            top: screenY,
+                            transform: `translate(-50%, -50%)`,
+                            transformOrigin: 'center center',
                             pointerEvents: 'auto',
                         };
-                        if (item.type === 'branch') {
-                            return (
-                                <Branch
-                                    key={item.id}
-                                    label={item.label}
-                                    content={item.content}
-                                    style={style}
-                                    onChange={(newLabel, newContent) => {
-                                        setItems(items.map(i =>
-                                            i.id === item.id
-                                                ? { ...i, label: newLabel, content: newContent }
-                                                : i
-                                        ));
-                                        // Persist label/content changes for branches as well if desired
-                                        updateIdea(userId, projectId, item.id, { text: newLabel, addtlText: newContent }).catch(() => {});
-                                    }}
-                                />
-                            );
-                        } else if (item.type === 'leaf') {
-                            return (
-                                <Leaf
-                                    key={item.id}
-                                    label={item.label}
-                                    content={item.content}
-                                    style={style}
-                                    onChange={(newLabel, newContent) => {
-                                        setItems(items.map(i =>
-                                            i.id === item.id
-                                                ? { ...i, label: newLabel, content: newContent }
-                                                : i
-                                        ));
-                                        // Persist leaf edits to ideas CRUD
-                                        updateIdea(userId, projectId, item.id, { text: newLabel, addtlText: newContent }).catch(() => {});
-                                    }}
-                                />
-                            );
-                        }
-                        return null;
+
+                        const commonProps = {
+                            label: item.label,
+                            onChange: (newLabel: string) => {
+                                // Clear isManuallyCreated only if user changed from default labels
+                                const wasDefaultLabel = item.label === 'New Branch' || item.label === 'New Question';
+                                const labelChanged = newLabel !== item.label;
+                                const shouldClearManualFlag = item.isManuallyCreated && wasDefaultLabel && labelChanged;
+                                
+                                const updatedItems = itemsRef.current.map(i =>
+                                    i.id === item.id
+                                        ? { ...i, label: newLabel, isManuallyCreated: shouldClearManualFlag ? false : i.isManuallyCreated }
+                                        : i
+                                );
+                                setItems(updatedItems);
+                                itemsRef.current = updatedItems;
+                                updateIdea(userId, projectId, item.id, { text: newLabel }).catch(() => {});
+                            },
+                            extraContext: userExtraContext,
+                            onExtraContextChange: setUserExtraContext,
+                            onGenerateMore: () => handleGenerateMore(item),
+                            isGenerating,
+                            isActive,
+                        };
+
+                        return (
+                            <div
+                                key={item.id}
+                                style={itemStyle}
+                                className={cn(
+                                    'group transition-transform',
+                                    isActive ? 'scale-[1.04] z-10' : 'scale-[1.0] z-0'
+                                )}
+                                onClick={() => handleItemClick(item)}
+                            >
+                                <div className={cn('rounded-2xl backdrop-blur-sm', isActive ? 'ring-4 ring-indigo-400/70 shadow-lg' : 'ring-1 ring-black/5 shadow-sm')}> 
+                                    {item.type === 'branch' ? 
+                                        <Branch {...commonProps} className={isActive ? 'bg-gradient-to-br from-amber-50 to-amber-100' : ''} /> : 
+                                        <Leaf {...commonProps} className={isActive ? 'bg-gradient-to-br from-emerald-50 to-emerald-100' : ''} />
+                                    }
+                                </div>
+                                <div className="absolute -top-2 -right-2 flex gap-1">
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); handleToggleLike(item.id); }}
+                                        className={cn('text-xs px-2 py-1 rounded-full shadow bg-white/80 backdrop-blur transition border', item.isLiked ? 'bg-pink-500 border-pink-600 text-white' : 'hover:bg-white border-neutral-300')}
+                                        title={item.isLiked ? 'Unlike' : 'Like'}
+                                    >{item.isLiked ? '♥' : '♡'}</button>
+                                </div>
+                            </div>
+                        );
                     })}
+                    {isGenerating && items.length === 0 && (
+                        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-3" aria-label="Loading initial ideas">
+                            <Skeleton className="h-24 w-48" />
+                            <Skeleton className="h-24 w-48" />
+                            <Skeleton className="h-24 w-48" />
+                        </div>
+                    )}
                 </div>
                 {/* Zoom indicator */}
                 <div className="absolute bottom-4 left-4 z-10 bg-card p-2 rounded shadow text-sm">
-                    Zoom: {(scale * 100).toFixed(0)}%
+                    Zoom: {(scale * 100).toFixed(0)}% {isGenerating && '· generating...'}
                 </div>
             </div>
         </div>

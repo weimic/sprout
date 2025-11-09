@@ -38,6 +38,9 @@ export interface Idea {
   index: number; // ordering key, ascending
   isLiked: boolean;
   addtlText?: string;
+  parentId?: string; // for hierarchical relationships
+  rootId?: string; // top ancestor for grouping/queries
+  depth?: number; // derived logical depth
   x?: number; // optional spatial fields for future use
   y?: number;
 }
@@ -143,7 +146,7 @@ export async function deleteProjectWithIdeas(userId: string, projectId: string):
 export async function createIdea(
   userId: string,
   projectId: string,
-  input: { text: string; addtlText?: string; x?: number; y?: number }
+  input: { text: string; addtlText?: string; parentId?: string; rootId?: string; depth?: number; x?: number; y?: number }
 ): Promise<string> {
   // compute next sequential index
   const q = query(ideasColRef(userId, projectId), orderBy('index', 'desc'), limit(1));
@@ -155,6 +158,9 @@ export async function createIdea(
     addtlText: input.addtlText ?? '',
     isLiked: false,
     index: nextIndex,
+    ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
+    ...(input.rootId !== undefined ? { rootId: input.rootId } : {}),
+    ...(input.depth !== undefined ? { depth: input.depth } : {}),
     ...(input.x !== undefined ? { x: input.x } : {}),
     ...(input.y !== undefined ? { y: input.y } : {}),
   } satisfies Idea);
@@ -184,7 +190,7 @@ export async function updateIdea(
   userId: string,
   projectId: string,
   ideaId: string,
-  update: Partial<Pick<Idea, 'text' | 'addtlText' | 'index' | 'isLiked' | 'x' | 'y'>>
+  update: Partial<Pick<Idea, 'text' | 'addtlText' | 'index' | 'isLiked' | 'parentId' | 'rootId' | 'depth' | 'x' | 'y'>>
 ): Promise<void> {
   await updateDoc(ideaDocRef(userId, projectId, ideaId), update as Partial<Idea>);
 }
