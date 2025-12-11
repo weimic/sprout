@@ -52,3 +52,30 @@ Throughout the development process, we had some considerations for an extension 
 - Integrate a voice-to-text or conversational feature, where the user can talk through their ideas rather than type them down. The website can then write down the user's thoughts and provide feedback more quickly.
 - Expand to shareable online projects so groups can think and collaborate.
 - Allow image embedding and AI suggestions related to the content.
+
+## Comprehensive Codebase Analysis
+
+### Core Architecture
+Sprout is built on a modern **Next.js 16** (App Router) framework, leveraging **React 19** for its latest concurrent features. The application follows a clear separation of concerns:
+- **Frontend**: `src/app` handles routing and layout, while `src/components` contains reusable UI elements built with **ShadCN UI** (Radix primitives + Lucide icons) and styled with **TailwindCSS 4**.
+- **Backend Services**: Serverless architecture using **Firebase 12**. `src/services/firebase.ts` and `firestore.ts` manage authentication and database interactions.
+- **AI Integration**: Server-side API routes (`src/app/api`) interface with **Google's Gemini 2.0 Flash** model.
+
+### Key Technical Implementations
+
+#### 1. Infinite Canvas System (`src/components/canvas`)
+The heart of Sprout is a custom-built infinite canvas engine.
+- **Performance**: Uses `useRef` for direct DOM manipulation and coordinate tracking to ensure 60fps performance during drag-and-drop operations, bypassing React's render cycle for high-frequency events.
+- **Coordinate System**: Implements a virtual world coordinate system (`x`, `y`) with smooth panning and zooming capabilities.
+- **Data Model**: Defined in `src/lib/canvasModel.ts`, the canvas treats ideas as a tree structure of `blocks` (Branches and Leaves) with parent-child relationships, allowing for complex idea mapping.
+
+#### 2. AI "Mentor" Logic (`src/app/api/ideas/generate`)
+The AI is not just a text generator but a structured "Facilitator".
+- **Dual Modes**: The system dynamically switches between a **Generator** persona (for creative expansion) and a **Provocateur** persona (for challenging assumptions) based on user intent.
+- **Structured Output**: Enforces strict JSON responses from the Gemini model to ensure seamless integration with the frontend UI components.
+- **Context Awareness**: The API route constructs prompts that include the project's "Trunk" (mission statement) and the specific context of the selected branch/leaf to generate relevant suggestions.
+
+#### 3. Data Persistence & State
+- **Firestore**: Utilized for real-time data storage of Projects, Ideas, and Notes. The data structure supports the hierarchical nature of the mind map.
+- **Authentication**: Firebase Auth handles user sessions with persistence enabled, ensuring a smooth user experience across reloads.
+
