@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Use gemini-1.5-flash or gemini-pro as fallback
 // gemini-2.0-flash may not be available in all regions yet
-const MODEL = process.env.NEXT_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash';
+const MODEL = process.env.NEXT_PUBLIC_GEMINI_MODEL || 'gemini-2.5-flash-lite';
 
 /**
  * API Route: Generate Useful External Links
